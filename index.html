@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodeSpace - Collaborative IDE</title>
+    <meta name="description" content="A modern, collaborative coding IDE with real-time collaboration and multi-language support" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background: #0d1117;
+        color: #e6edf3;
+        font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
+      
+      /* Monaco Editor Dark Theme Overrides */
+      .monaco-editor {
+        background: #0d1117 !important;
+      }
+      
+      .monaco-editor .margin {
+        background: #0d1117 !important;
+      }
+      
+      /* Custom scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      
+      ::-webkit-scrollbar-track {
+        background: #161b22;
+      }
+      
+      ::-webkit-scrollbar-thumb {
+        background: #30363d;
+        border-radius: 4px;
+      }
+      
+      ::-webkit-scrollbar-thumb:hover {
+        background: #484f58;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
