@@ -42,9 +42,20 @@ export const EnterShareTokenDialog: React.FC<EnterShareTokenDialogProps> = ({
       const response = await apiClient.accessShareToken(tokenToUse);
       setSuccessMessage('Access granted! Redirecting...');
       
-      // Navigate based on the file type or default to editor
+      // Navigate based on the resource type
       setTimeout(() => {
-        navigate(`/editor/${response.fileId}`);
+        if (response.resourceType === 'file') {
+          navigate(`/editor/${response.resourceId}`);
+        } else if (response.resourceType === 'project') {
+          if (response.projectType === 'github') {
+            navigate(`/github-project/${response.resourceId}`);
+          } else { // Assuming 'zip' or other project types
+            navigate(`/project/${response.resourceId}`);
+          }
+        } else {
+          // Fallback to editor for unknown types
+          navigate(`/editor/${response.resourceId}`);
+        }
         onClose();
       }, 1000);
       

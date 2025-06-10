@@ -361,6 +361,7 @@ export const EditorPage: React.FC = () => {
         onClose={() => setShowShareDialog(false)}
         fileId={currentShareId}
         fileName={currentShareTitle}
+        resourceType="file"
       />
     </div>
   );

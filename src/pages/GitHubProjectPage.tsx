@@ -480,6 +480,7 @@ export const GitHubProjectPage: React.FC = () => {
         onClose={() => setShowShareDialog(false)}
         fileId={currentShareId}
         fileName={currentShareTitle}
+        resourceType="project"
       />
 
       {/* GitHub Commit Dialog */}

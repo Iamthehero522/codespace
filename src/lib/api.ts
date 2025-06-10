@@ -175,26 +175,25 @@ class ApiClient {
     });
   }
 
-  // Share token methods
-  async generateShareToken(fileId: string, permission: 'read' | 'write', expiresIn?: string) {
-    return this.request('/share/generate', {
+  // Share token methods - Updated to support both files and projects
+  async generateShareToken(resourceId: string, resourceType: 'file' | 'project', permission: 'read' | 'write', expiresIn?: string) {
+    return this.request('/codespace/share/generate', {
       method: 'POST',
-      body: JSON.stringify({ fileId, permission, expiresIn }),
+      body: JSON.stringify({ resourceId, resourceType, permission, expiresIn }),
     });
   }
 
   async accessShareToken(token: string) {
-    return this.request('/share/access', {
+    return this.request('/codespace/share/access', {
       method: 'POST',
       body: JSON.stringify({ token }),
     });
   }
 
-  // Email sharing functionality
+  // Email sharing functionality - Updated to use shareToken
   async sendShareEmail(emailData: {
     recipientEmail: string;
-    shareUrl: string;
-    fileName: string;
+    shareToken: string;
     permission: 'read' | 'write';
     message?: string;
     expiresIn?: string;

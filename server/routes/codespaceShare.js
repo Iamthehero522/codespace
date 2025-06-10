@@ -2,25 +2,37 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const pool = require('../db');
-const auth = require('../middleware/auth');
+const { pool } = require('../utils/db.js');
+const { authenticateToken: auth } = require('../middleware/auth.js');
 const emailService = require('../emailService');
 
 // Generate share token
 router.post('/generate', auth, async (req, res) => {
   try {
-    const { fileId, permission = 'read', expiresIn } = req.body;
+    const { resourceId, resourceType, permission = 'read', expiresIn } = req.body;
     const userId = req.user.id;
 
-    // Verify user owns the file or has access to it
-    const fileCheck = await pool.query(
-      'SELECT * FROM files WHERE id = $1 AND owner_id = $2',
-      [fileId, userId]
-    );
-
-    if (fileCheck.rows.length === 0) {
-      return res.status(404).json({ error: 'File not found or access denied' });
+    // Verify user owns the resource or has access to it
+    let resourceCheck;
+    if (resourceType === 'file') {
+      resourceCheck = await pool.query(
+        'SELECT id, name, type FROM files WHERE id = $1 AND owner_id = $2',
+        [resourceId, userId]
+      );
+    } else if (resourceType === 'project') {
+      resourceCheck = await pool.query(
+        'SELECT id, name, project_type FROM projects WHERE id = $1 AND owner_id = $2',
+        [resourceId, userId]
+      );
+    } else {
+      return res.status(400).json({ error: 'Invalid resource type' });
     }
+
+    if (resourceCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Resource not found or access denied' });
+    }
+
+    const resourceName = resourceCheck.rows[0].name;
 
     // Generate unique token
     const token = uuidv4();
@@ -59,10 +71,10 @@ router.post('/generate', auth, async (req, res) => {
 
     // Store share token in database
     const shareResult = await pool.query(
-      `INSERT INTO codespace_share (file_id, owner_id, token, permission, expires_at) 
-       VALUES ($1, $2, $3, $4, $5) 
+      `INSERT INTO codespace_share (resource_id, resource_type, owner_id, token, permission, expires_at) 
+       VALUES ($1, $2, $3, $4, $5, $6) 
        RETURNING *`,
-      [fileId, userId, token, permission, expiresAt]
+      [resourceId, resourceType, userId, token, permission, expiresAt]
     );
 
     res.json({
@@ -70,7 +82,8 @@ router.post('/generate', auth, async (req, res) => {
       token: token,
       shareUrl: `${process.env.FRONTEND_URL}/share?token=${token}`,
       permission: permission,
-      expiresAt: expiresAt
+      expiresAt: expiresAt,
+      resourceName: resourceName
     });
 
   } catch (error) {
@@ -91,9 +104,8 @@ router.post('/access', auth, async (req, res) => {
 
     // Find share record
     const shareResult = await pool.query(
-      `SELECT cs.*, f.name as file_name, f.type as file_type, u.name as owner_name
+      `SELECT cs.*, u.name as owner_name
        FROM codespace_share cs
-       JOIN files f ON cs.file_id = f.id
        JOIN users u ON cs.owner_id = u.id
        WHERE cs.token = $1`,
       [token]
@@ -110,20 +122,42 @@ router.post('/access', auth, async (req, res) => {
       return res.status(410).json({ error: 'Share token has expired' });
     }
 
-    // Grant access to the user (add to user_files if not already present)
-    await pool.query(
-      `INSERT INTO user_files (user_id, file_id, permission) 
-       VALUES ($1, $2, $3) 
-       ON CONFLICT (user_id, file_id) 
-       DO UPDATE SET permission = EXCLUDED.permission`,
-      [userId, share.file_id, share.permission]
-    );
+    let resourceDetails;
+    if (share.resource_type === 'file') {
+      resourceDetails = await pool.query(
+        'SELECT id, name, type FROM files WHERE id = $1',
+        [share.resource_id]
+      );
+      if (resourceDetails.rows.length === 0) {
+        return res.status(404).json({ error: 'Shared file not found' });
+      }
+      // Grant access to the user (add to user_files if not already present)
+      await pool.query(
+        `INSERT INTO user_files (user_id, file_id, permission) 
+         VALUES ($1, $2, $3) 
+         ON CONFLICT (user_id, file_id) 
+         DO UPDATE SET permission = EXCLUDED.permission`,
+        [userId, share.resource_id, share.permission]
+      );
+    } else if (share.resource_type === 'project') {
+      resourceDetails = await pool.query(
+        'SELECT id, name, project_type FROM projects WHERE id = $1',
+        [share.resource_id]
+      );
+      if (resourceDetails.rows.length === 0) {
+        return res.status(404).json({ error: 'Shared project not found' });
+      }
+    } else {
+      return res.status(400).json({ error: 'Unknown resource type in share record' });
+    }
 
     res.json({
       success: true,
-      fileId: share.file_id,
-      fileName: share.file_name,
-      fileType: share.file_type,
+      resourceId: share.resource_id,
+      resourceType: share.resource_type,
+      resourceName: resourceDetails.rows[0].name,
+      fileType: resourceDetails.rows[0].type, // Only for files
+      projectType: resourceDetails.rows[0].project_type, // Only for projects
       permission: share.permission,
       ownerName: share.owner_name
     });
@@ -137,7 +171,7 @@ router.post('/access', auth, async (req, res) => {
 // Send share email
 router.post('/send-email', auth, async (req, res) => {
   try {
-    const { recipientEmail, shareUrl, fileName, permission, message, expiresIn } = req.body;
+    const { recipientEmail, shareToken, message, expiresIn } = req.body;
     const userId = req.user.id;
 
     // Get sender information
@@ -152,12 +186,40 @@ router.post('/send-email', auth, async (req, res) => {
 
     const sender = userResult.rows[0];
 
+    // Retrieve share details from the token to get resource name and URL
+    const shareDetailsResult = await pool.query(
+      `SELECT cs.resource_id, cs.resource_type, cs.permission, cs.expires_at
+       FROM codespace_share cs
+       WHERE cs.token = $1`,
+      [shareToken]
+    );
+
+    if (shareDetailsResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Share token not found' });
+    }
+    const shareDetails = shareDetailsResult.rows[0];
+
+    let resourceName;
+    if (shareDetails.resource_type === 'file') {
+      const fileResult = await pool.query('SELECT name FROM files WHERE id = $1', [shareDetails.resource_id]);
+      resourceName = fileResult.rows[0]?.name;
+    } else if (shareDetails.resource_type === 'project') {
+      const projectResult = await pool.query('SELECT name FROM projects WHERE id = $1', [shareDetails.resource_id]);
+      resourceName = projectResult.rows[0]?.name;
+    }
+
+    if (!resourceName) {
+      return res.status(404).json({ error: 'Shared resource name not found' });
+    }
+
+    const shareUrl = `${process.env.FRONTEND_URL}/share?token=${shareToken}`;
+
     // Send email
     await emailService.sendShareEmail({
       recipientEmail,
       shareUrl,
-      fileName,
-      permission,
+      fileName: resourceName,
+      permission: shareDetails.permission,
       senderName: sender.name,
       message,
       expiresIn
@@ -179,18 +241,29 @@ router.get('/my-shares', auth, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const sharesResult = await pool.query(
-      `SELECT cs.*, f.name as file_name, f.type as file_type
+    // Fetch shares for files
+    const fileSharesResult = await pool.query(
+      `SELECT cs.*, f.name as resource_name, f.type as resource_type_detail
        FROM codespace_share cs
-       JOIN files f ON cs.file_id = f.id
-       WHERE cs.owner_id = $1
+       JOIN files f ON cs.resource_id = f.id
+       WHERE cs.owner_id = $1 AND cs.resource_type = 'file'
+       ORDER BY cs.created_at DESC`,
+      [userId]
+    );
+
+    // Fetch shares for projects
+    const projectSharesResult = await pool.query(
+      `SELECT cs.*, p.name as resource_name, p.project_type as resource_type_detail
+       FROM codespace_share cs
+       JOIN projects p ON cs.resource_id = p.id
+       WHERE cs.owner_id = $1 AND cs.resource_type = 'project'
        ORDER BY cs.created_at DESC`,
       [userId]
     );
 
     res.json({
       success: true,
-      shares: sharesResult.rows
+      shares: [...fileSharesResult.rows, ...projectSharesResult.rows]
     });
 
   } catch (error) {

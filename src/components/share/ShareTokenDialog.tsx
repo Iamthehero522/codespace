@@ -10,6 +10,7 @@ interface ShareTokenDialogProps {
   onClose: () => void;
   fileId: string;
   fileName: string;
+  resourceType?: 'file' | 'project'; // New optional prop with default to 'file'
 }
 
 export const ShareTokenDialog: React.FC<ShareTokenDialogProps> = ({
@@ -17,10 +18,12 @@ export const ShareTokenDialog: React.FC<ShareTokenDialogProps> = ({
   onClose,
   fileId,
   fileName,
+  resourceType = 'file', // Default to 'file' for backward compatibility
 }) => {
   const [permission, setPermission] = useState<'read' | 'write'>('read');
   const [expiresIn, setExpiresIn] = useState('7d'); // Default to 7 days
   const [generatedShareUrl, setGeneratedShareUrl] = useState('');
+  const [generatedToken, setGeneratedToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
@@ -37,12 +40,14 @@ export const ShareTokenDialog: React.FC<ShareTokenDialogProps> = ({
     setLoading(true);
     setError('');
     setGeneratedShareUrl('');
+    setGeneratedToken('');
     setEmailSent(false);
 
     try {
-      const response = await apiClient.generateShareToken(fileId, permission, expiresIn);
+      const response = await apiClient.generateShareToken(fileId, resourceType, permission, expiresIn);
       // server now returns the full URL for us
       setGeneratedShareUrl(response.shareUrl);
+      setGeneratedToken(response.token);
     } catch (err: any) {
       console.error('Share token generation error:', err);
       setError(err.message || 'Failed to generate share token.');
@@ -53,7 +58,7 @@ export const ShareTokenDialog: React.FC<ShareTokenDialogProps> = ({
 
   const handleSendEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailRecipient || !generatedShareUrl) return;
+    if (!emailRecipient || !generatedToken) return;
 
     setSendingEmail(true);
     setError('');
@@ -61,8 +66,7 @@ export const ShareTokenDialog: React.FC<ShareTokenDialogProps> = ({
     try {
       await apiClient.sendShareEmail({
         recipientEmail: emailRecipient,
-        shareUrl: generatedShareUrl,
-        fileName: fileName,
+        shareToken: generatedToken,
         permission: permission,
         message: emailMessage,
         expiresIn: expiresIn
@@ -92,6 +96,7 @@ export const ShareTokenDialog: React.FC<ShareTokenDialogProps> = ({
 
   const handleClose = () => {
     setGeneratedShareUrl('');
+    setGeneratedToken('');
     setError('');
     setEmailRecipient('');
     setEmailMessage('');
@@ -191,7 +196,7 @@ export const ShareTokenDialog: React.FC<ShareTokenDialogProps> = ({
                   </Button>
                 </div>
                 <p className="text-xs text-gray-400">
-                  Share this link with others to give them access to your file
+                  Share this link with others to give them access to your {resourceType}
                 </p>
               </div>
 
